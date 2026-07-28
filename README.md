@@ -52,14 +52,24 @@ terraform show -json tfplan > tfplan.json
 
 ### 2. Run `tfchange`
 
-#### Pass file path as positional argument:
+#### Default TUI Mode
+
 ```bash
 tfchange tfplan.json
+# or via stdin
+terraform show -json tfplan | tfchange
 ```
 
-#### Pipe directly via stdin:
+#### Table Summary Mode (tf-summarize style)
+
 ```bash
-terraform show -json tfplan | tfchange
+tfchange --mode=table tfplan.json
+```
+
+#### Standard Text Output
+
+```bash
+tfchange --mode=text tfplan.json
 ```
 
 ---

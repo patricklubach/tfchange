@@ -47,3 +47,5 @@ tfchange
 tfplan.json
 tfplan
 *.txt
+
+tfchange-*
