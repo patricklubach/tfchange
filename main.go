@@ -16,7 +16,6 @@ import (
 	"github.com/olekukonko/tablewriter"
 )
 
-// Action represents an individual state modification type in a plan.
 type Action string
 
 const (
@@ -28,10 +27,8 @@ const (
 	ActionReplace Action = "replace"
 )
 
-// ActionList contains actions planned for a single resource.
 type ActionList []Action
 
-// IsNoOp determines if a resource change is a no-operation or read-only.
 func (al ActionList) IsNoOp() bool {
 	if len(al) == 0 {
 		return true
@@ -44,15 +41,15 @@ func (al ActionList) IsNoOp() bool {
 	return true
 }
 
-// Change tracks attribute states and unknown dynamic values before and after plan execution.
+// Change tracks attribute states, unknown dynamic values, and replacement triggers.
 type Change struct {
 	Actions      ActionList             `json:"actions"`
 	Before       map[string]interface{} `json:"before"`
 	After        map[string]interface{} `json:"after"`
 	AfterUnknown map[string]interface{} `json:"after_unknown"`
+	ReplacePaths interface{}            `json:"replace_paths,omitempty"`
 }
 
-// ResourceChange represents a planned modification to a Terraform resource.
 type ResourceChange struct {
 	Address string  `json:"address"`
 	Type    string  `json:"type"`
@@ -60,9 +57,64 @@ type ResourceChange struct {
 	Change  *Change `json:"change"`
 }
 
-// Plan represents the relevant structure of a Terraform JSON execution plan.
 type Plan struct {
 	ResourceChanges []*ResourceChange `json:"resource_changes"`
+}
+
+type SummaryCounts struct {
+	Create  int
+	Update  int
+	Delete  int
+	Replace int
+}
+
+func (s SummaryCounts) String(useColor bool) string {
+	parts := []string{}
+
+	format := func(count int, label string, colorFunc func(a ...interface{}) string) string {
+		str := fmt.Sprintf("%d to %s", count, label)
+		if useColor && colorFunc != nil {
+			return colorFunc(str)
+		}
+		return str
+	}
+
+	if s.Create > 0 {
+		parts = append(parts, format(s.Create, "be created", color.New(color.FgGreen).SprintFunc()))
+	}
+	if s.Update > 0 {
+		parts = append(parts, format(s.Update, "be updated", color.New(color.FgYellow).SprintFunc()))
+	}
+	if s.Replace > 0 {
+		parts = append(parts, format(s.Replace, "be replaced", color.New(color.FgMagenta).SprintFunc()))
+	}
+	if s.Delete > 0 {
+		parts = append(parts, format(s.Delete, "be destroyed", color.New(color.FgRed).SprintFunc()))
+	}
+
+	if len(parts) == 0 {
+		return "No changes."
+	}
+
+	return "Plan: " + strings.Join(parts, ", ") + "."
+}
+
+func calculateSummary(changes []*ResourceChange) SummaryCounts {
+	var counts SummaryCounts
+	for _, rc := range changes {
+		_, _, actionType := getActionDetails(rc.Change.Actions)
+		switch actionType {
+		case "create":
+			counts.Create++
+		case "update":
+			counts.Update++
+		case "delete":
+			counts.Delete++
+		case "replace":
+			counts.Replace++
+		}
+	}
+	return counts
 }
 
 var (
@@ -76,7 +128,6 @@ var (
 	normalStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 )
 
-// formatValue serializes property values into formatted, untruncated JSON strings.
 func formatValue(v interface{}) string {
 	if v == nil {
 		return "null"
@@ -88,7 +139,6 @@ func formatValue(v interface{}) string {
 	return string(b)
 }
 
-// isUnknown checks whether an attribute key or nested field is marked as unknown in after_unknown.
 func isUnknown(unknownMap map[string]interface{}, key string) bool {
 	if unknownMap == nil {
 		return false
@@ -103,7 +153,34 @@ func isUnknown(unknownMap map[string]interface{}, key string) bool {
 	return val != nil
 }
 
-// getActionDetails returns the symbol, description, and action type for styling.
+// forcesReplacement checks if a top-level key or path is listed in replace_paths.
+func forcesReplacement(replacePaths interface{}, key string) bool {
+	if replacePaths == nil {
+		return false
+	}
+
+	paths, ok := replacePaths.([]interface{})
+	if !ok {
+		return false
+	}
+
+	for _, p := range paths {
+		switch path := p.(type) {
+		case string:
+			if path == key {
+				return true
+			}
+		case []interface{}:
+			if len(path) > 0 {
+				if firstElem, ok := path[0].(string); ok && firstElem == key {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func getActionDetails(actions ActionList) (string, string, string) {
 	if len(actions) == 0 {
 		return "#", "no-op", "noop"
@@ -135,7 +212,6 @@ func getActionDetails(actions ActionList) (string, string, string) {
 	}
 }
 
-// renderResourceDiff formats and returns a single resource change diff.
 func renderResourceDiff(rc *ResourceChange, useColor bool) string {
 	var sb strings.Builder
 	symbol, actionDesc, actionType := getActionDetails(rc.Change.Actions)
@@ -163,6 +239,7 @@ func renderResourceDiff(rc *ResourceChange, useColor bool) string {
 	before := rc.Change.Before
 	after := rc.Change.After
 	afterUnknown := rc.Change.AfterUnknown
+	replacePaths := rc.Change.ReplacePaths
 
 	keySet := make(map[string]struct{})
 	for k := range before {
@@ -185,26 +262,32 @@ func renderResourceDiff(rc *ResourceChange, useColor bool) string {
 		vBefore, inBefore := before[k]
 		vAfter, inAfter := after[k]
 		unknown := isUnknown(afterUnknown, k)
+		isReplaceKey := forcesReplacement(replacePaths, k)
+
+		forcesSuffix := ""
+		if isReplaceKey {
+			forcesSuffix = " # forces replacement"
+		}
 
 		var line string
 		var lineType string
 
 		switch {
 		case inBefore && !inAfter && !unknown:
-			line = fmt.Sprintf("      - %s = %s\n", k, formatValue(vBefore))
+			line = fmt.Sprintf("      - %s = %s%s\n", k, formatValue(vBefore), forcesSuffix)
 			lineType = "delete"
 
 		case (!inBefore || vBefore == nil) && unknown:
-			line = fmt.Sprintf("      + %s = (known after apply)\n", k)
+			line = fmt.Sprintf("      + %s = (known after apply)%s\n", k, forcesSuffix)
 			lineType = "create"
 
 		case !inBefore && inAfter:
-			line = fmt.Sprintf("      + %s = %s\n", k, formatValue(vAfter))
+			line = fmt.Sprintf("      + %s = %s%s\n", k, formatValue(vAfter), forcesSuffix)
 			lineType = "create"
 
 		case inBefore && unknown:
 			sBefore := formatValue(vBefore)
-			line = fmt.Sprintf("      ~ %s = %s -> (known after apply)\n", k, sBefore)
+			line = fmt.Sprintf("      ~ %s = %s -> (known after apply)%s\n", k, sBefore, forcesSuffix)
 			lineType = "update"
 
 		case inBefore && inAfter:
@@ -213,9 +296,9 @@ func renderResourceDiff(rc *ResourceChange, useColor bool) string {
 
 			if sBefore != sAfter {
 				if strings.Contains(sBefore, "\n") || strings.Contains(sAfter, "\n") {
-					line = fmt.Sprintf("      ~ %s = %s\n        -> %s\n", k, sBefore, sAfter)
+					line = fmt.Sprintf("      ~ %s = %s\n        -> %s%s\n", k, sBefore, sAfter, forcesSuffix)
 				} else {
-					line = fmt.Sprintf("      ~ %s = %s -> %s\n", k, sBefore, sAfter)
+					line = fmt.Sprintf("      ~ %s = %s -> %s%s\n", k, sBefore, sAfter, forcesSuffix)
 				}
 				lineType = "update"
 			} else {
@@ -244,8 +327,7 @@ func renderResourceDiff(rc *ResourceChange, useColor bool) string {
 	return sb.String()
 }
 
-// renderTableSummary outputs a tf-summarize style table representation.
-func renderTableSummary(w io.Writer, changes []*ResourceChange) {
+func renderTableSummary(w io.Writer, changes []*ResourceChange, useColor bool) {
 	table := tablewriter.NewWriter(w)
 	table.SetHeader([]string{"Change", "Resource Type", "Resource Name", "Address"})
 	table.SetBorder(true)
@@ -257,13 +339,25 @@ func renderTableSummary(w io.Writer, changes []*ResourceChange) {
 		var changeStr string
 		switch actionType {
 		case "create":
-			changeStr = colorAdd("CREATE")
+			changeStr = "CREATE"
+			if useColor {
+				changeStr = colorAdd(changeStr)
+			}
 		case "delete":
-			changeStr = colorDelete("DELETE")
+			changeStr = "DELETE"
+			if useColor {
+				changeStr = colorDelete(changeStr)
+			}
 		case "update":
-			changeStr = colorUpdate("UPDATE")
+			changeStr = "UPDATE"
+			if useColor {
+				changeStr = colorUpdate(changeStr)
+			}
 		case "replace":
-			changeStr = colorReplace("REPLACE")
+			changeStr = "REPLACE"
+			if useColor {
+				changeStr = colorReplace(changeStr)
+			}
 		default:
 			changeStr = "NOOP"
 		}
@@ -272,18 +366,60 @@ func renderTableSummary(w io.Writer, changes []*ResourceChange) {
 	}
 
 	table.Render()
+	summary := calculateSummary(changes)
+	fmt.Fprintln(w, summary.String(useColor))
 }
 
-// model represents the state of the interactive TUI view.
+func renderMarkdownTable(w io.Writer, changes []*ResourceChange, useColor bool) {
+	fmt.Fprintln(w, "| Change | Resource Type | Resource Name | Address |")
+	fmt.Fprintln(w, "| --- | --- | --- | --- |")
+
+	for _, rc := range changes {
+		_, _, actionType := getActionDetails(rc.Change.Actions)
+
+		var changeStr string
+		switch actionType {
+		case "create":
+			changeStr = "CREATE"
+			if useColor {
+				changeStr = colorAdd(changeStr)
+			}
+		case "delete":
+			changeStr = "DELETE"
+			if useColor {
+				changeStr = colorDelete(changeStr)
+			}
+		case "update":
+			changeStr = "UPDATE"
+			if useColor {
+				changeStr = colorUpdate(changeStr)
+			}
+		case "replace":
+			changeStr = "REPLACE"
+			if useColor {
+				changeStr = colorReplace(changeStr)
+			}
+		default:
+			changeStr = "NOOP"
+		}
+
+		fmt.Fprintf(w, "| %s | %s | %s | %s |\n", changeStr, rc.Type, rc.Name, rc.Address)
+	}
+
+	summary := calculateSummary(changes)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, summary.String(useColor))
+}
+
 type model struct {
 	changes    []*ResourceChange
 	cursor     int
 	showDetail bool
 	viewport   viewport.Model
-	ready      bool
 	width      int
 	height     int
 	useColor   bool
+	summary    SummaryCounts
 }
 
 func initialModel(changes []*ResourceChange, useColor bool) model {
@@ -291,6 +427,7 @@ func initialModel(changes []*ResourceChange, useColor bool) model {
 		changes:  changes,
 		cursor:   0,
 		useColor: useColor,
+		summary:  calculateSummary(changes),
 	}
 }
 
@@ -331,7 +468,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				rc := m.changes[m.cursor]
 				content := renderResourceDiff(rc, m.useColor)
 
-				m.viewport = viewport.New(m.width, m.height-2)
+				m.viewport = viewport.New(m.width, m.height-3)
 				m.viewport.SetContent(content)
 			}
 		}
@@ -341,7 +478,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		if m.showDetail {
 			m.viewport.Width = msg.Width
-			m.viewport.Height = msg.Height - 2
+			m.viewport.Height = msg.Height - 3
 		}
 	}
 
@@ -359,6 +496,7 @@ func (m model) View() string {
 	}
 
 	var sb strings.Builder
+	sb.WriteString(m.summary.String(m.useColor) + "\n")
 	sb.WriteString("Terraform Plan Changes (Use ↑/↓ to navigate, Space to view full change, 'q' to quit):\n\n")
 
 	for i, rc := range m.changes {
@@ -367,13 +505,25 @@ func (m model) View() string {
 		var actionFormatted string
 		switch actionType {
 		case "create":
-			actionFormatted = colorAdd(symbol + " CREATE")
+			actionFormatted = symbol + " CREATE"
+			if m.useColor {
+				actionFormatted = colorAdd(actionFormatted)
+			}
 		case "delete":
-			actionFormatted = colorDelete(symbol + " DELETE")
+			actionFormatted = symbol + " DELETE"
+			if m.useColor {
+				actionFormatted = colorDelete(actionFormatted)
+			}
 		case "update":
-			actionFormatted = colorUpdate(symbol + " UPDATE")
+			actionFormatted = symbol + " UPDATE"
+			if m.useColor {
+				actionFormatted = colorUpdate(actionFormatted)
+			}
 		case "replace":
-			actionFormatted = colorReplace(symbol + " REPLACE")
+			actionFormatted = symbol + " REPLACE"
+			if m.useColor {
+				actionFormatted = colorReplace(actionFormatted)
+			}
 		}
 
 		line := fmt.Sprintf("[%s] %s", actionFormatted, rc.Address)
@@ -411,11 +561,12 @@ func parsePlan(r io.Reader) ([]*ResourceChange, error) {
 }
 
 func main() {
-	modeFlag := flag.String("mode", "tui", "Display mode: 'tui', 'table', or 'text'")
+	modeFlag := flag.String("mode", "tui", "Display mode: 'tui', 'table', 'md', or 'text'")
 	noColorFlag := flag.Bool("no-color", false, "Disable color output")
 	flag.Parse()
 
 	useColor := !*noColorFlag
+	color.NoColor = *noColorFlag
 
 	var input io.Reader = os.Stdin
 	if flag.NArg() > 0 {
@@ -436,11 +587,15 @@ func main() {
 
 	switch *modeFlag {
 	case "table":
-		renderTableSummary(os.Stdout, changes)
+		renderTableSummary(os.Stdout, changes, useColor)
+	case "md":
+		renderMarkdownTable(os.Stdout, changes, useColor)
 	case "text":
 		for _, rc := range changes {
 			fmt.Print(renderResourceDiff(rc, useColor))
 		}
+		summary := calculateSummary(changes)
+		fmt.Println(summary.String(useColor))
 	case "tui":
 		p := tea.NewProgram(initialModel(changes, useColor), tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
@@ -448,7 +603,7 @@ func main() {
 			os.Exit(1)
 		}
 	default:
-		fmt.Fprintf(os.Stderr, "Invalid mode: %s. Valid choices are 'tui', 'table', 'text'\n", *modeFlag)
+		fmt.Fprintf(os.Stderr, "Invalid mode: %s. Valid choices are 'tui', 'table', 'md', 'text'\n", *modeFlag)
 		os.Exit(1)
 	}
 }

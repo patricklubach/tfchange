@@ -9,8 +9,8 @@ resource "local_file" "foo" {
 # }
 
 resource "local_file" "baz" {
-  content  = "baz!lol"
-  filename = "${path.module}/baz.txt"
+  content  = "foo!lol"
+  filename = "${path.module}/bazz.txt"
 }
 
 resource "local_file" "lel" {

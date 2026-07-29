@@ -1,26 +1,26 @@
 # tfchange
 
-`tfchange` is a lightweight command-line utility written in Go that parses Terraform JSON execution plans and renders untruncated, human-readable resource diffs.
+`tfchange` is a command-line tool and interactive TUI written in Go that parses Terraform JSON execution plans and renders untruncated, human-readable resource diffs.
 
-Unlike standard `terraform plan` or `terraform show` commands, which automatically truncate large strings, complex nested objects, or omit unchanged fields (e.g. `# (6 unchanged attributes hidden)`), `tfchange` prints every attribute and value completely expanded—including explicit `(known after apply)` dynamic markers.
+Unlike standard `terraform plan` or `terraform show` outputs, which omit unchanged attributes (e.g. `# (6 unchanged attributes hidden)`) or truncate long strings/blobs, `tfchange` gives you full visibility over every single resource attribute.
 
 ---
 
 ## Features
 
-- **Zero Truncation**: Full string contents, large JSON blobs, and complex objects are displayed without ellipsis (`...`).
-- **No Hidden Attributes**: Shows all attributes on modified resources, ensuring complete visibility during code reviews and security auditing.
-- **Terraform-Native Formatting**: Uses standard diff markers (`+`, `-`, `~`, `-/+`) matching official Terraform plan conventions.
-- **Dynamic Value Detection**: Accurately parses `after_unknown` schema maps to display `(known after apply)` markers for values determined post-deployment.
-- **Pipeline Ready**: Accepts piped standard input (`stdin`) or direct file paths.
-
+- **Interactive TUI Mode**: Navigate changed resources using `↑`/`↓` and toggle full resource diffs with `Space`.
+- **Multiple Output Modes**: Supports interactive TUI (`tui`), standard text (`text`), summary table (`table`), and Markdown table (`md`).
+- **Zero Truncation**: Prints large multi-line strings, nested maps, and full object states intact.
+- **Summary Counters**: Generates explicit change counters (e.g. `Plan: 2 to be created, 1 to be updated, 1 to be destroyed.`).
+- **Color Control**: Full ANSI color support with a `-no-color` flag to strip color codes across all output modes.
+- **Dynamic Value Detection**: Explicitly identifies post-deployment dynamic values with `(known after apply)` markers.
 ---
 
 ## Installation
 
 ### Prerequisites
 
-- **Go**: Version 1.18 or higher.
+- **Go**: Version 1.20 or higher.
 - **Terraform**: Required to generate binary execution plans.
 
 ### Build from Source
@@ -50,54 +50,90 @@ terraform plan -out=tfplan
 terraform show -json tfplan > tfplan.json
 ```
 
-### 2. Run `tfchange`
+### 2. Output Modes & Flags
 
-#### Default TUI Mode
+#### Flags
 
-```bash
-tfchange tfplan.json
-# or via stdin
-terraform show -json tfplan | tfchange
-```
+* `-mode`: Set display mode (tui, text, table, md). Default is tui.
+* `-no-color`: Disable colorized output across all modes.
 
-#### Table Summary Mode (tf-summarize style)
+## Examples
 
-```bash
-tfchange --mode=table tfplan.json
-```
+### 1. Interactive TUI Mode (`-mode=tui`)
 
-#### Standard Text Output
+Default view when running `tfchange tfplan.json`:
 
 ```bash
-tfchange --mode=text tfplan.json
+Plan: 1 to be created, 1 to be updated.
+Terraform Plan Changes (Use ↑/↓ to navigate, Space to view full change, 'q' to quit):
+
+> [+ CREATE] aws_instance.web
+  [~ UPDATE] aws_security_group.app_sg
 ```
 
----
+> Press Space on any selected item to view the untruncated diff inside a full viewport:
 
-## Output Example
+```bash
+Resource Change Details (Press Space or 'q' to close):
 
-```hcl
 # aws_security_group.app_sg will be updated in-place
   ~ resource "aws_security_group" "app_sg" {
-      ~ description = "Production SG" -> "Production App SG - Internal"
-        id = "sg-0123456789abcdef0"
-      ~ ingress = [
-          {
-            "cidr_blocks": [
-              "10.0.0.0/16"
-            ],
-            "from_port": 80,
-            "protocol": "tcp",
-            "to_port": 80
-          }
-        ]
-      + ingress_rule_id = (known after apply)
-        name = "app-service-sg"
-      ~ tags = {
-          "Environment": "production",
-          "ManagedBy": "Terraform"
-        }
+      ~ description = "Old SG" -> "New SG"
+      + id = (known after apply)
     }
+```
+
+### 2. Table Summary Mode (`-mode=table`)
+
+Provides a tf-summarize-like tabular overview:
+
+```bash
+$ tfchange -mode=table tfplan.json
+
++--------+--------------------+---------------+---------------------------+
+| CHANGE |   RESOURCE TYPE    | RESOURCE NAME |          ADDRESS          |
++--------+--------------------+---------------+---------------------------+
+| UPDATE | aws_security_group | app_sg        | aws_security_group.app_sg |
+| CREATE | aws_instance       | web           | aws_instance.web          |
++--------+--------------------+---------------+---------------------------+
+Plan: 1 to be created, 1 to be updated.
+```
+
+### 3. Markdown Mode (`-mode=md`)
+
+Generates valid Markdown tables suitable for GitHub PR comments or documentation:
+
+```bash
+tfchange -mode=md tfplan.json
+
+| Change | Resource Type | Resource Name | Address |
+| --- | --- | --- | --- |
+| UPDATE | aws_security_group | app_sg | aws_security_group.app_sg |
+| CREATE | aws_instance | web | aws_instance.web |
+
+Plan: 1 to be created, 1 to be updated.
+```
+
+### 4. Text Diff Mode (`-mode=text`)
+
+Outputs raw, untruncated diffs directly to stdout:
+
+```bash
+tfchange -mode=text tfplan.json
+
+# aws_security_group.app_sg will be updated in-place
+  ~ resource "aws_security_group" "app_sg" {
+      ~ description = "Old SG" -> "New SG"
+      + id = (known after apply)
+    }
+
+# aws_instance.web will be created
+  + resource "aws_instance" "web" {
+      + instance_type = "t3.micro"
+      + id = (known after apply)
+    }
+
+Plan: 1 to be created, 1 to be updated.
 ```
 
 ---
