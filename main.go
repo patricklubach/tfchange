@@ -69,6 +69,7 @@ type SummaryCounts struct {
 	Replace int
 }
 
+// String formats the accumulated resource change counts into a single-line summary string.
 func (s SummaryCounts) String(useColor bool) string {
 	parts := []string{}
 
@@ -525,7 +526,8 @@ func (m model) View() string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(m.summary.String(m.useColor) + "\n")
+	s := fmt.Sprintf("%s%s", m.summary.String(m.useColor), "\n")
+	sb.WriteString(s)
 	sb.WriteString("Terraform Plan Changes (Use ↑/↓ to navigate, Space to view full change, 'q' to quit):\n\n")
 
 	for i, rc := range m.changes {
