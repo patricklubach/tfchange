@@ -129,6 +129,7 @@ var (
 	normalStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 )
 
+// formatValue serializes property values into formatted, untruncated JSON strings.
 func formatValue(v interface{}) string {
 	if v == nil {
 		return "null"
@@ -140,6 +141,7 @@ func formatValue(v interface{}) string {
 	return string(b)
 }
 
+// isUnknown checks whether an attribute key or nested field is marked as unknown in after_unknown.
 func isUnknown(unknownMap map[string]interface{}, key string) bool {
 	if unknownMap == nil {
 		return false
@@ -182,6 +184,7 @@ func forcesReplacement(replacePaths interface{}, key string) bool {
 	return false
 }
 
+// getActionDetails returns the symbol, description, and action type for styling.
 func getActionDetails(actions ActionList) (string, string, string) {
 	if len(actions) == 0 {
 		return "#", "no-op", "noop"
@@ -213,6 +216,7 @@ func getActionDetails(actions ActionList) (string, string, string) {
 	}
 }
 
+// renderResourceDiff formats and returns a single resource change diff.
 func renderResourceDiff(rc *ResourceChange, useColor bool) string {
 	var sb strings.Builder
 	symbol, actionDesc, actionType := getActionDetails(rc.Change.Actions)
@@ -328,6 +332,7 @@ func renderResourceDiff(rc *ResourceChange, useColor bool) string {
 	return sb.String()
 }
 
+// renderTableSummary outputs a tf-summarize style table representation.
 func renderTableSummary(w io.Writer, changes []*ResourceChange, useColor bool) {
 	table := tablewriter.NewWriter(w)
 	table.SetHeader([]string{"Change", "Resource Type", "Resource Name", "Address"})
@@ -374,6 +379,7 @@ func renderTableSummary(w io.Writer, changes []*ResourceChange, useColor bool) {
 	}
 }
 
+// renderMarkdownTable renders resource changes into a formatted Markdown table.
 func renderMarkdownTable(w io.Writer, changes []*ResourceChange, useColor bool) {
 	_, err := fmt.Fprintln(w, "| Change | Resource Type | Resource Name | Address |")
 	if err != nil {
@@ -441,6 +447,7 @@ type model struct {
 	summary    SummaryCounts
 }
 
+// initialModel initializes the Bubble Tea TUI state.
 func initialModel(changes []*ResourceChange, useColor bool) model {
 	return model{
 		changes:  changes,
@@ -450,10 +457,12 @@ func initialModel(changes []*ResourceChange, useColor bool) model {
 	}
 }
 
+// Init defines the initial command for the TUI model.
 func (m model) Init() tea.Cmd {
 	return nil
 }
 
+// Update handles incoming TUI events and user keyboard navigation.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
@@ -504,6 +513,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// View renders the current state of the TUI interface.
 func (m model) View() string {
 	if len(m.changes) == 0 {
 		return "No changes found in plan.\nPress 'q' to exit."
@@ -557,6 +567,7 @@ func (m model) View() string {
 	return sb.String()
 }
 
+// parsePlan reads JSON data from an io.Reader and unmarshals it into resource changes.
 func parsePlan(r io.Reader) ([]*ResourceChange, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
