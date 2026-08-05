@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"sort"
 	"strings"
@@ -367,12 +368,21 @@ func renderTableSummary(w io.Writer, changes []*ResourceChange, useColor bool) {
 
 	table.Render()
 	summary := calculateSummary(changes)
-	fmt.Fprintln(w, summary.String(useColor))
+	_, err := fmt.Fprintln(w, summary.String(useColor))
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 func renderMarkdownTable(w io.Writer, changes []*ResourceChange, useColor bool) {
-	fmt.Fprintln(w, "| Change | Resource Type | Resource Name | Address |")
-	fmt.Fprintln(w, "| --- | --- | --- | --- |")
+	_, err := fmt.Fprintln(w, "| Change | Resource Type | Resource Name | Address |")
+	if err != nil {
+		log.Fatal(err)
+	}
+	_, err = fmt.Fprintln(w, "| --- | --- | --- | --- |")
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	for _, rc := range changes {
 		_, _, actionType := getActionDetails(rc.Change.Actions)
@@ -403,12 +413,21 @@ func renderMarkdownTable(w io.Writer, changes []*ResourceChange, useColor bool) 
 			changeStr = "NOOP"
 		}
 
-		fmt.Fprintf(w, "| %s | %s | %s | %s |\n", changeStr, rc.Type, rc.Name, rc.Address)
+		_, err = fmt.Fprintf(w, "| %s | %s | %s | %s |\n", changeStr, rc.Type, rc.Name, rc.Address)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	summary := calculateSummary(changes)
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, summary.String(useColor))
+	_, err = fmt.Fprintln(w)
+	if err != nil {
+		log.Fatal(err)
+	}
+	_, err = fmt.Fprintln(w, summary.String(useColor))
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 type model struct {
@@ -575,7 +594,13 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error opening file: %v\n", err)
 			os.Exit(1)
 		}
-		defer file.Close()
+		defer func() {
+			err := file.Close()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error closing file: %v\n", err)
+				os.Exit(1)
+			}
+		}()
 		input = file
 	}
 
