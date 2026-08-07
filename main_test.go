@@ -92,18 +92,21 @@ func TestRenderMarkdownTable(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	renderMarkdownTable(&buf, changes, false)
-	out := buf.String()
+	renderMarkdownTable(&buf, changes)
+	got := buf.String()
 
-	if !strings.Contains(out, "| Change | Resource Type | Resource Name | Address |") {
-		t.Errorf("markdown table missing header")
+	expected := "| CHANGE |   RESOURCE TYPE    | RESOURCE NAME |          ADDRESS          |"
+	if !strings.Contains(got, expected) {
+		t.Errorf("markdown table missing header. Expected:\n%s\nin\n%s", expected, got)
 	}
 
-	if !strings.Contains(out, "| UPDATE | aws_security_group | app_sg | aws_security_group.app_sg |") {
+	expected = "| UPDATE | aws_security_group |    app_sg     | aws_security_group.app_sg |"
+	if !strings.Contains(got, expected) {
 		t.Errorf("markdown table missing row entry")
 	}
 
-	if !strings.Contains(out, "Plan: 1 to be created, 1 to be updated.") {
-		t.Errorf("markdown output missing summary line")
+	expected = "Plan: 1 to be created, 1 to be updated."
+	if !strings.Contains(got, expected) {
+		t.Errorf("markdown output missing summary line. Expected:\n%s\nin\n%s", expected, got)
 	}
 }

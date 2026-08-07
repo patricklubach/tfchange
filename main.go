@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/fatih/color"
 	"github.com/olekukonko/tablewriter"
+	"github.com/olekukonko/tablewriter/renderer"
 )
 
 type Action string
@@ -336,9 +337,7 @@ func renderResourceDiff(rc *ResourceChange, useColor bool) string {
 // renderTableSummary outputs a tf-summarize style table representation.
 func renderTableSummary(w io.Writer, changes []*ResourceChange, useColor bool) {
 	table := tablewriter.NewWriter(w)
-	table.SetHeader([]string{"Change", "Resource Type", "Resource Name", "Address"})
-	table.SetBorder(true)
-	table.SetAutoWrapText(false)
+	table.Header([]string{"Change", "Address"})
 
 	for _, rc := range changes {
 		_, _, actionType := getActionDetails(rc.Change.Actions)
@@ -369,7 +368,7 @@ func renderTableSummary(w io.Writer, changes []*ResourceChange, useColor bool) {
 			changeStr = "NOOP"
 		}
 
-		table.Append([]string{changeStr, rc.Type, rc.Name, rc.Address})
+		table.Append(changeStr, rc.Address)
 	}
 
 	table.Render()
@@ -381,15 +380,11 @@ func renderTableSummary(w io.Writer, changes []*ResourceChange, useColor bool) {
 }
 
 // renderMarkdownTable renders resource changes into a formatted Markdown table.
-func renderMarkdownTable(w io.Writer, changes []*ResourceChange, useColor bool) {
-	_, err := fmt.Fprintln(w, "| Change | Resource Type | Resource Name | Address |")
-	if err != nil {
-		log.Fatal(err)
-	}
-	_, err = fmt.Fprintln(w, "| --- | --- | --- | --- |")
-	if err != nil {
-		log.Fatal(err)
-	}
+func renderMarkdownTable(w io.Writer, changes []*ResourceChange) {
+	table := tablewriter.NewTable(w,
+		tablewriter.WithRenderer(renderer.NewMarkdown()),
+	)
+	table.Header([]string{"Change", "Resource Type", "Resource Name", "Address"})
 
 	for _, rc := range changes {
 		_, _, actionType := getActionDetails(rc.Change.Actions)
@@ -398,40 +393,25 @@ func renderMarkdownTable(w io.Writer, changes []*ResourceChange, useColor bool) 
 		switch actionType {
 		case "create":
 			changeStr = "CREATE"
-			if useColor {
-				changeStr = colorAdd(changeStr)
-			}
 		case "delete":
 			changeStr = "DELETE"
-			if useColor {
-				changeStr = colorDelete(changeStr)
-			}
 		case "update":
 			changeStr = "UPDATE"
-			if useColor {
-				changeStr = colorUpdate(changeStr)
-			}
 		case "replace":
 			changeStr = "REPLACE"
-			if useColor {
-				changeStr = colorReplace(changeStr)
-			}
 		default:
 			changeStr = "NOOP"
 		}
-
-		_, err = fmt.Fprintf(w, "| %s | %s | %s | %s |\n", changeStr, rc.Type, rc.Name, rc.Address)
-		if err != nil {
-			log.Fatal(err)
-		}
+		table.Append(changeStr, rc.Type, rc.Name, rc.Address)
 	}
+	table.Render()
 
 	summary := calculateSummary(changes)
-	_, err = fmt.Fprintln(w)
+	_, err := fmt.Fprintln(w)
 	if err != nil {
 		log.Fatal(err)
 	}
-	_, err = fmt.Fprintln(w, summary.String(useColor))
+	_, err = fmt.Fprintln(w, summary.String(false))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -569,7 +549,7 @@ func (m model) View() string {
 	return sb.String()
 }
 
-// parsePlan reads JSON data from an io.Reader and unmarshals it into resource changes.
+// parsePlan reads JSON data from an io.Reader and unmarshals it into resource changes and returns it.
 func parsePlan(r io.Reader) ([]*ResourceChange, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
@@ -627,7 +607,7 @@ func main() {
 	case "table":
 		renderTableSummary(os.Stdout, changes, useColor)
 	case "md":
-		renderMarkdownTable(os.Stdout, changes, useColor)
+		renderMarkdownTable(os.Stdout, changes)
 	case "text":
 		for _, rc := range changes {
 			fmt.Print(renderResourceDiff(rc, useColor))
