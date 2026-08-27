@@ -45,11 +45,11 @@ func (al ActionList) IsNoOp() bool {
 
 // Change tracks attribute states, unknown dynamic values, and replacement triggers.
 type Change struct {
-	Actions      ActionList             `json:"actions"`
-	Before       map[string]interface{} `json:"before"`
-	After        map[string]interface{} `json:"after"`
-	AfterUnknown map[string]interface{} `json:"after_unknown"`
-	ReplacePaths interface{}            `json:"replace_paths,omitempty"`
+	Actions      ActionList     `json:"actions"`
+	Before       map[string]any `json:"before"`
+	After        map[string]any `json:"after"`
+	AfterUnknown map[string]any `json:"after_unknown"`
+	ReplacePaths any            `json:"replace_paths,omitempty"`
 }
 
 type ResourceChange struct {
@@ -74,7 +74,7 @@ type SummaryCounts struct {
 func (s SummaryCounts) String(useColor bool) string {
 	parts := []string{}
 
-	format := func(count int, label string, colorFunc func(a ...interface{}) string) string {
+	format := func(count int, label string, colorFunc func(a ...any) string) string {
 		str := fmt.Sprintf("%d to %s", count, label)
 		if useColor && colorFunc != nil {
 			return colorFunc(str)
@@ -132,7 +132,7 @@ var (
 )
 
 // formatValue serializes property values into formatted, untruncated JSON strings.
-func formatValue(v interface{}) string {
+func formatValue(v any) string {
 	if v == nil {
 		return "null"
 	}
@@ -144,7 +144,7 @@ func formatValue(v interface{}) string {
 }
 
 // isUnknown checks whether an attribute key or nested field is marked as unknown in after_unknown.
-func isUnknown(unknownMap map[string]interface{}, key string) bool {
+func isUnknown(unknownMap map[string]any, key string) bool {
 	if unknownMap == nil {
 		return false
 	}
@@ -159,12 +159,12 @@ func isUnknown(unknownMap map[string]interface{}, key string) bool {
 }
 
 // forcesReplacement checks if a top-level key or path is listed in replace_paths.
-func forcesReplacement(replacePaths interface{}, key string) bool {
+func forcesReplacement(replacePaths any, key string) bool {
 	if replacePaths == nil {
 		return false
 	}
 
-	paths, ok := replacePaths.([]interface{})
+	paths, ok := replacePaths.([]any)
 	if !ok {
 		return false
 	}
@@ -175,7 +175,7 @@ func forcesReplacement(replacePaths interface{}, key string) bool {
 			if path == key {
 				return true
 			}
-		case []interface{}:
+		case []any:
 			if len(path) > 0 {
 				if firstElem, ok := path[0].(string); ok && firstElem == key {
 					return true
