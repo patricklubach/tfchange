@@ -27,7 +27,7 @@ Unlike standard `terraform plan` or `terraform show` outputs, which omit unchang
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/tfchange.git
+git clone https://github.com/patricklubach/tfchange.git
 cd tfchange
 
 # Build the binary
