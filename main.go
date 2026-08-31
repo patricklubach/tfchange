@@ -1,21 +1,36 @@
+// tfchange is a Terraform plan formatter. It can display the plan in
+// several output modes: a terminal UI (tui), a table, markdown, a
+// text diff, or a raw JSON representation of the filtered plan.
+//
+// Usage examples:
+//   tfchange -mode tui <plan.json
+//   tfchange -mode table
+//   tfchange -mode md
+//   tfchange -mode text
+//   tfchange -mode json
+//
+// For more details see the README.
+
 package main
 
 import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
-	"log"
-	"os"
-	"sort"
-	"strings"
+    "bytes"
+    "io"
+    "log"
+    "os"
+    "sort"
+    "strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/fatih/color"
-	"github.com/olekukonko/tablewriter"
-	"github.com/olekukonko/tablewriter/renderer"
+    "github.com/charmbracelet/bubbles/viewport"
+    tea "github.com/charmbracelet/bubbletea"
+    "github.com/charmbracelet/lipgloss"
+    "github.com/fatih/color"
+    "github.com/olekukonko/tablewriter"
+    "github.com/olekukonko/tablewriter/renderer"
+
 )
 
 type Action string
@@ -27,6 +42,8 @@ const (
 	ActionUpdate  Action = "update"
 	ActionDelete  Action = "delete"
 	ActionReplace Action = "replace"
+
+const version = "0.0.1"
 )
 
 type ActionList []Action
@@ -71,7 +88,7 @@ type SummaryCounts struct {
 }
 
 // String formats the accumulated resource change counts into a single-line summary string.
-func (s SummaryCounts) String(useColor bool) string {
+func (s SummaryCounts) Summary(useColor bool) string {
 	parts := []string{}
 
 	format := func(count int, label string, colorFunc func(a ...any) string) string {
@@ -105,7 +122,7 @@ func (s SummaryCounts) String(useColor bool) string {
 func calculateSummary(changes []*ResourceChange) SummaryCounts {
 	var counts SummaryCounts
 	for _, rc := range changes {
-		_, _, actionType := getActionDetails(rc.Change.Actions)
+		_, actionType := getActionDetails(rc.Change.Actions)
 		switch actionType {
 		case "create":
 			counts.Create++
@@ -187,41 +204,55 @@ func forcesReplacement(replacePaths any, key string) bool {
 }
 
 // getActionDetails returns the symbol, description, and action type for styling.
-func getActionDetails(actions ActionList) (string, string, string) {
-	if len(actions) == 0 {
-		return "#", "no-op", "noop"
-	}
+func getActionDetails(actions ActionList) (string, string) {
+    if len(actions) == 0 {
+        return "#", "noop"
+    }
 
-	var hasCreate, hasDelete bool
-	for _, a := range actions {
-		if a == ActionCreate {
-			hasCreate = true
-		}
-		if a == ActionDelete {
-			hasDelete = true
-		}
-	}
+    var hasCreate, hasDelete bool
+    for _, a := range actions {
+        if a == ActionCreate {
+            hasCreate = true
+        }
+        if a == ActionDelete {
+            hasDelete = true
+        }
+    }
 
-	if hasCreate && hasDelete {
-		return "-/+", "must be replaced", "replace"
-	}
+    if hasCreate && hasDelete {
+        return "-/+", "replace"
+    }
 
-	switch actions[0] {
-	case ActionCreate:
-		return "+", "will be created", "create"
-	case ActionDelete:
-		return "-", "will be destroyed", "delete"
-	case ActionUpdate:
-		return "~", "will be updated in-place", "update"
-	default:
-		return "~", "will be modified", "update"
-	}
+    switch actions[0] {
+    case ActionCreate:
+        return "+", "create"
+    case ActionDelete:
+        return "-", "delete"
+    case ActionUpdate:
+        return "~", "update"
+    default:
+        return "~", "update"
+    }
 }
 
 // renderResourceDiff formats and returns a single resource change diff.
 func renderResourceDiff(rc *ResourceChange, useColor bool) string {
 	var sb strings.Builder
-	symbol, actionDesc, actionType := getActionDetails(rc.Change.Actions)
+  symbol, actionType := getActionDetails(rc.Change.Actions)
+
+  var actionDesc string
+  switch actionType {
+  case "create":
+      actionDesc = "will be created"
+  case "delete":
+      actionDesc = "will be destroyed"
+  case "replace":
+      actionDesc = "must be replaced"
+  case "update":
+      actionDesc = "will be updated in-place"
+  default:
+      actionDesc = "will be modified"
+  }
 
 	headerComment := fmt.Sprintf("# %s %s\n", rc.Address, actionDesc)
 	resourceHeader := fmt.Sprintf("  %s resource %q %q {\n", symbol, rc.Type, rc.Name)
@@ -340,7 +371,7 @@ func renderTableSummary(w io.Writer, changes []*ResourceChange, useColor bool) {
 	table.Header([]string{"Change", "Address"})
 
 	for _, rc := range changes {
-		_, _, actionType := getActionDetails(rc.Change.Actions)
+		_, actionType := getActionDetails(rc.Change.Actions)
 
 		var changeStr string
 		switch actionType {
@@ -372,8 +403,8 @@ func renderTableSummary(w io.Writer, changes []*ResourceChange, useColor bool) {
 	}
 
 	table.Render()
-	summary := calculateSummary(changes)
-	_, err := fmt.Fprintln(w, summary.String(useColor))
+summary := calculateSummary(changes)
+    _, err := fmt.Fprintln(w, summary.Summary(useColor))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -387,7 +418,7 @@ func renderMarkdownTable(w io.Writer, changes []*ResourceChange) {
 	table.Header([]string{"Change", "Resource Type", "Resource Name", "Address"})
 
 	for _, rc := range changes {
-		_, _, actionType := getActionDetails(rc.Change.Actions)
+		_, actionType := getActionDetails(rc.Change.Actions)
 
 		var changeStr string
 		switch actionType {
@@ -411,7 +442,7 @@ func renderMarkdownTable(w io.Writer, changes []*ResourceChange) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	_, err = fmt.Fprintln(w, summary.String(false))
+	_, err = fmt.Fprintln(w, summary.Summary(false))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -506,12 +537,12 @@ func (m model) View() string {
 	}
 
 	var sb strings.Builder
-	s := fmt.Sprintf("%s%s", m.summary.String(m.useColor), "\n")
+	s := fmt.Sprintf("%s%s", m.summary.Summary(m.useColor), "\n")
 	sb.WriteString(s)
 	sb.WriteString("Terraform Plan Changes (Use ↑/↓ to navigate, Space to view full change, 'q' to quit):\n\n")
 
 	for i, rc := range m.changes {
-		symbol, _, actionType := getActionDetails(rc.Change.Actions)
+		symbol, actionType := getActionDetails(rc.Change.Actions)
 
 		var actionFormatted string
 		switch actionType {
@@ -556,72 +587,116 @@ func parsePlan(r io.Reader) ([]*ResourceChange, error) {
 		return nil, fmt.Errorf("reading input: %w", err)
 	}
 
-	var plan Plan
-	if err := json.Unmarshal(data, &plan); err != nil {
-		return nil, fmt.Errorf("parsing plan JSON: %w", err)
-	}
+    var plan Plan
+    if err := json.Unmarshal(data, &plan); err != nil {
+        return nil, fmt.Errorf("parsing plan JSON: %w", err)
+    }
 
-	var changed []*ResourceChange
-	for _, rc := range plan.ResourceChanges {
-		if rc.Change == nil || rc.Change.Actions.IsNoOp() {
-			continue
-		}
-		changed = append(changed, rc)
-	}
+    var changed []*ResourceChange
+    for _, rc := range plan.ResourceChanges {
+        if rc.Change == nil || rc.Change.Actions.IsNoOp() {
+            continue
+        }
+        changed = append(changed, rc)
+    }
 
-	return changed, nil
+    return changed, nil
 }
 
 func main() {
 	modeFlag := flag.String("mode", "tui", "Display mode: 'tui', 'table', 'md', or 'text'")
 	noColorFlag := flag.Bool("no-color", false, "Disable color output")
+
+// Program version and verbose mode
+versionFlag := flag.Bool("v", false, "Print program version")
+verboseFlag := flag.Bool("verbose", false, "Enable verbose logging")
 	flag.Parse()
+
+    // Handle version flag
+    if *versionFlag {
+        fmt.Println(version)
+        os.Exit(0)
+    }
+    // Handle verbose logging
+    if *verboseFlag {
+        log.SetFlags(log.LstdFlags)
+    } else {
+        log.SetFlags(0)
+    }
 
 	useColor := !*noColorFlag
 	color.NoColor = *noColorFlag
 
-	var input io.Reader = os.Stdin
-	if flag.NArg() > 0 {
-		file, err := os.Open(flag.Arg(0))
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error opening file: %v\n", err)
-			os.Exit(1)
-		}
-		defer func() {
-			err := file.Close()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error closing file: %v\n", err)
-				os.Exit(1)
-			}
-		}()
-		input = file
-	}
+    // Read all input into data
+    var data []byte
+    if flag.NArg() > 0 {
+        file, err := os.Open(flag.Arg(0))
+        if err != nil {
+            fmt.Fprintf(os.Stderr, "Error opening file: %v\n", err)
+            os.Exit(1)
+        }
+        data, err = io.ReadAll(file)
+        if err != nil {
+            fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
+            os.Exit(1)
+        }
+        if err = file.Close(); err != nil {
+            fmt.Fprintf(os.Stderr, "Error closing file: %v\n", err)
+            os.Exit(1)
+        }
+    } else {
+        var err error
+        data, err = io.ReadAll(os.Stdin)
+        if err != nil {
+            fmt.Fprintf(os.Stderr, "Error reading stdin: %v\n", err)
+            os.Exit(1)
+        }
+    }
 
-	changes, err := parsePlan(input)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
+    // Parse changes
+    changes, err := parsePlan(bytes.NewReader(data))
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+        os.Exit(1)
+    }
 
-	switch *modeFlag {
-	case "table":
-		renderTableSummary(os.Stdout, changes, useColor)
-	case "md":
-		renderMarkdownTable(os.Stdout, changes)
-	case "text":
-		for _, rc := range changes {
-			fmt.Print(renderResourceDiff(rc, useColor))
-		}
-		summary := calculateSummary(changes)
-		fmt.Println(summary.String(useColor))
-	case "tui":
-		p := tea.NewProgram(initialModel(changes, useColor), tea.WithAltScreen())
-		if _, err := p.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
-			os.Exit(1)
-		}
-	default:
-		fmt.Fprintf(os.Stderr, "Invalid mode: %s. Valid choices are 'tui', 'table', 'md', 'text'\n", *modeFlag)
-		os.Exit(1)
-	}
+    // Unmarshal full plan for JSON mode
+    var plan Plan
+    if err := json.Unmarshal(data, &plan); err != nil {
+        fmt.Fprintf(os.Stderr, "Error parsing plan JSON: %v\n", err)
+        os.Exit(1)
+    }
+
+  switch *modeFlag {
+  case "table":
+      renderTableSummary(os.Stdout, changes, useColor)
+  case "md":
+      renderMarkdownTable(os.Stdout, changes)
+  case "text":
+      for _, rc := range changes {
+          fmt.Print(renderResourceDiff(rc, useColor))
+      }
+      summary := calculateSummary(changes)
+      fmt.Println(summary.Summary(useColor))
+  case "json":
+      // Output the filtered plan as JSON
+        filteredPlan := plan
+      filteredPlan.ResourceChanges = changes
+      encoder := json.NewEncoder(os.Stdout)
+      encoder.SetIndent("", "  ")
+      if err := encoder.Encode(filteredPlan); err != nil {
+          fmt.Fprintf(os.Stderr, "Error encoding JSON: %v\n", err)
+          os.Exit(1)
+      }
+  case "tui":
+      p := tea.NewProgram(initialModel(changes, useColor), tea.WithAltScreen())
+      if _, err := p.Run(); err != nil {
+          fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
+          os.Exit(1)
+      }
+  default:
+      fmt.Fprintf(os.Stderr, "Invalid mode: %s. Valid choices are 'tui', 'table', 'md', 'text', 'json'\n", *modeFlag)
+      os.Exit(1)
+  }
+
 }

@@ -57,7 +57,7 @@ func TestCalculateSummary(t *testing.T) {
 		t.Errorf("expected 1 create and 1 update, got: %+v", summary)
 	}
 
-	summaryString := summary.String(false)
+	summaryString := summary.Summary(false)
 	expected := "Plan: 1 to be created, 1 to be updated."
 	if summaryString != expected {
 		t.Errorf("expected '%s', got '%s'", expected, summaryString)
